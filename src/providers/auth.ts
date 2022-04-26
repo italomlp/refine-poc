@@ -1,46 +1,53 @@
 import { AuthProvider } from '@pankod/refine-core';
+import { AxiosError } from 'axios';
 
 import { http } from '@/interfaces/http';
-import { UserRole } from '@/models/roles';
+import { appDataProvider } from '@/providers/data';
 
-const mockUsers = [
-  {
-    username: 'admin',
-    password: 'admin',
-    token: '123',
-    role: UserRole.ADMIN,
-  },
-  {
-    username: 'editor',
-    password: 'editor',
-    token: '321',
-    role: UserRole.EDITOR,
-  },
-];
+type IAuthUser = {
+  username: string;
+  password: string;
+};
+
+type IUser = {
+  email: string;
+  token: string;
+};
+
+const setAuthTokenHeader = (token: string) => {
+  http.defaults.headers.common = {
+    authentication: token,
+  };
+};
 
 export const getAuthProvider = (
-  onChangeLoggedUser: (user: typeof mockUsers[0] | null) => void
+  onChangeLoggedUser: (user: IUser | null) => void
 ): AuthProvider => ({
-  login: ({ username, password }) => {
-    // Suppose we actually send a request to the back end here.
-    const user = mockUsers.find(item => item.username === username);
+  login: async ({ username, password }: IAuthUser) => {
+    try {
+      const response = await appDataProvider.custom!({
+        url: 'signin/',
+        method: 'post',
+        payload: {
+          user: {
+            email: username,
+            password,
+          },
+        },
+      });
 
-    if (!user) {
-      return Promise.reject();
+      const user = {
+        email: username,
+        token: response.data.access_token,
+      };
+
+      localStorage.setItem('auth', JSON.stringify(user));
+      onChangeLoggedUser(user);
+
+      setAuthTokenHeader(user.token);
+    } catch (error) {
+      throw new Error((error as AxiosError)?.response?.data?.message);
     }
-
-    if (user.password !== password) {
-      return Promise.reject('Invalid username or password');
-    }
-
-    localStorage.setItem('auth', JSON.stringify(user));
-    onChangeLoggedUser(user);
-
-    http.defaults.headers.common = {
-      Authorization: `Bearer ${user.token}`,
-    };
-
-    return Promise.resolve();
   },
   logout: () => {
     localStorage.removeItem('auth');
@@ -57,6 +64,7 @@ export const getAuthProvider = (
     const auth = localStorage.getItem('auth');
     if (auth) {
       const parsedUser = JSON.parse(auth);
+      setAuthTokenHeader(parsedUser.token);
       onChangeLoggedUser(parsedUser);
       return Promise.resolve();
     }
@@ -66,8 +74,7 @@ export const getAuthProvider = (
   getPermissions: () => {
     const auth = localStorage.getItem('auth');
     if (auth) {
-      const parsedUser = JSON.parse(auth);
-      return Promise.resolve(parsedUser.role);
+      return Promise.resolve('admin');
     }
     return Promise.reject();
   },
